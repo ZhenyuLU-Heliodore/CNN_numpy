@@ -5,8 +5,8 @@ from model.PoolingBlock import MaxPooling2D
 from model.FlattenBlock import Flatten
 from model.DenseBlock import Dense
 from model.ActivationBlock import Activation
-from model.RNNBLock import BasicRNN
 import pickle
+import matplotlib.pyplot as plt
 #Model to train and test
 #and have Dense
 
@@ -24,11 +24,15 @@ class Model(object):
 
         self.__train_x_set = None
         self.__train_y_set = None
-        # self.__test_x_set = None
-        # self.__test_y_set = None
+
+        self.__test_x_set = None
+        self.__test_y_set = None
 
         self.__train_loss_log = []
         self.__train_acc_log = []
+
+        self.__test_loss_log = []
+        self.__test_acc_log = []
 
     def initial(self, block):
         temp_dim = self._input_dim
@@ -82,12 +86,15 @@ class Model(object):
         for i in range(len(self.__layer_name_lst)):
             print("{}:Layer[{}] Output Dim={}".format(self.name,
                                                       self.__layer_name_lst[i], self.__layer_output_dim_lst[i]))
+    def show_block(self,name):
+       m=self.__layer_block_dct[name]
+       m.show_filter()
 
     def __forward(self, _x_set):
         temp_z_set = _x_set.copy()
         self.__z['x'] = temp_z_set
         for layer_block in self.__layer_block_dct.values():
-            if isinstance(layer_block, (Conv2D, Dense, Flatten, Activation, BasicRNN)):
+            if isinstance(layer_block, (Conv2D, Dense, Flatten, Activation)):
                 temp_z_set = layer_block.forward(temp_z_set)
                 self.__z[layer_block.name] = temp_z_set
             elif isinstance(layer_block, MaxPooling2D):
@@ -102,7 +109,7 @@ class Model(object):
             layer_name = self.__layer_name_lst[i]
             layer_name_down = self.__layer_name_lst[i - 1]
             layer_block = self.__layer_block_dct[layer_name]
-            if isinstance(layer_block, (Conv2D, Dense, Flatten, BasicRNN)):
+            if isinstance(layer_block, (Conv2D, Dense, Flatten)):
                 _e_set = self.__e[layer_name]
                 self.__e[layer_name_down] = layer_block.backward(_e_set)
             elif isinstance(layer_block, MaxPooling2D):
@@ -136,7 +143,7 @@ class Model(object):
             layer_name = self.__layer_name_lst[i]
             layer_name_down = self.__layer_name_lst[i - 1]
             layer_block = self.__layer_block_dct[layer_name]
-            if isinstance(layer_block, (Conv2D, Dense, BasicRNN)):
+            if isinstance(layer_block, (Conv2D, Dense)):
                 _z_down = self.__z[layer_name_down]
                 _e = self.__e[layer_name]
                 # _dw[layer_name], _db[layer_name] = layer_block.gradient(_z_down, _e)
@@ -147,20 +154,22 @@ class Model(object):
         for i in range(len(self.__layer_name_lst) - 1, 0, -1):
             layer_name = self.__layer_name_lst[i]
             layer_block = self.__layer_block_dct[layer_name]
-            if isinstance(layer_block, (Conv2D, Dense, BasicRNN)):
+            if isinstance(layer_block, (Conv2D, Dense)):
                 layer_block.gradient_descent(_g[layer_name])
 
     def fit(self, train_x_set, train_y_set):
         self.__train_x_set = train_x_set
         self.__train_y_set = train_y_set
-
+    def set_test(self, test_x_set, test_y_set):
+        self.__test_x_set = test_x_set
+        self.__test_y_set = test_y_set
     @staticmethod
     def __shuffle_set(sample_set, target_set):
         index = np.arange(len(sample_set))
         np.random.shuffle(index)
         return sample_set[index], target_set[index]
 
-    def train(self, lr, momentum=0.9, max_epoch=1000, batch_size=64, shuffle=True, interval=100):
+    def train(self, lr, momentum=0.9, max_epoch=1000, batch_size=64, shuffle=True, interval=1):
       
         #Training model by SGD optimizer.
         #:param lr: learning rate
@@ -176,7 +185,7 @@ class Model(object):
             exit(1)
         _vg = {}
         for layer_name, layer_block in zip(self.__layer_block_dct.keys(), self.__layer_block_dct.values()):
-            if isinstance(layer_block, (Conv2D, Dense, BasicRNN)):
+            if isinstance(layer_block, (Conv2D, Dense)):
                 weight_shape = layer_block.weight_shape()
                 _vg[layer_name] = \
                     {weight_name: np.zeros(list(weight_shape[weight_name])) for weight_name in weight_shape}
@@ -188,8 +197,12 @@ class Model(object):
             t_x = self.__train_x_set[start_index:start_index + batch_size]
             t_y = self.__train_y_set[start_index:start_index + batch_size]
             _g, _batch_train_loss, _batch_train_acc = self.__gradient(t_x, t_y)
+
+
+            
+            _g_test, _batch_test_loss, _batch_test_acc = self.__gradient(self.__test_x_set[:100,:], self.__test_y_set[:100,:])
             for layer_name, layer_block in zip(self.__layer_block_dct.keys(), self.__layer_block_dct.values()):
-                if isinstance(layer_block, (Conv2D, Dense, BasicRNN)):
+                if isinstance(layer_block, (Conv2D, Dense)):
                     for weight_name in _g[layer_name]:
                         _vg[layer_name][weight_name] = momentum * _vg[layer_name][weight_name] \
                                                        - lr * _g[layer_name][weight_name]
@@ -200,8 +213,31 @@ class Model(object):
                 # train_acc = self.measure(self.__train_x_set, self.__train_y_set)
                 self.__train_loss_log.append(_batch_train_loss)
                 self.__train_acc_log.append(_batch_train_acc)
+                self.__test_loss_log.append(_batch_test_loss)
+                self.__test_acc_log.append(_batch_test_acc)
                 print('Epoch[{}] Batch[{}] Batch_Train_Loss=[{}] Batch_Train_Acc=[{}]'
                       .format(e, e % batch_nums, _batch_train_loss, _batch_train_acc))
+        
+        plt.figure(1,figsize=(800, 800))
+        plt.plot(self.__train_loss_log)
+        plt.xlabel("epoch")
+        plt.ylabel("loss")
+        plt.figure(2,figsize=(800, 800))
+        plt.plot(self.__train_acc_log)
+        plt.xlabel("epoch")
+        plt.ylabel("accuracy")
+        plt.figure(1,figsize=(800, 800))
+        plt.plot(self.__test_loss_log)
+        plt.xlabel("epoch")
+        plt.ylabel("loss")
+        plt.figure(2,figsize=(800, 800))
+        plt.plot(self.__test_acc_log)
+        plt.xlabel("epoch")
+        plt.ylabel("accuracy")
+        plt.show()
+
+
+
 
     def predict(self, _x_set):
         self.__forward(_x_set)
